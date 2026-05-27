@@ -1,0 +1,7 @@
+{
+  "schedule": "0 */2 * * * *",
+  "apiUrl": "https://data-joule.com/api/events/log",
+  "reserveAddress": "REPLACE_WITH_JOULECREDITRESERVE_ADDRESS_ON_AMOY",
+  "chainSelectorName": "polygon-testnet-amoy",
+  "maxDeltaPerWrite": "1000000000000"
+}

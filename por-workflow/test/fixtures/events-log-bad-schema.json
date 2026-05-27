@@ -1,0 +1,10 @@
+[
+  {
+    "event_name": "grid-tier1-1715515290",
+    "tier": 1,
+    "start_ts": 1715515290,
+    "kwh_reduced": "not a number",
+    "kwh_scaled": "375000",
+    "completed_at": 1715515480
+  }
+]

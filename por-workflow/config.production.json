@@ -1,0 +1,7 @@
+{
+  "schedule": "0 */2 * * * *",
+  "apiUrl": "https://data-joule.com/api/events/log",
+  "reserveAddress": "REPLACE_WITH_JOULECREDITRESERVE_ADDRESS_ON_POLYGON_MAINNET",
+  "chainSelectorName": "polygon-mainnet",
+  "maxDeltaPerWrite": "1000000000000"
+}

@@ -1,0 +1,38 @@
+[
+  {
+    "event_name": "ons-tier2-1715000000",
+    "tier": 2,
+    "start_ts": 1715000000,
+    "end_ts": 1715000300,
+    "baseline_w": 13.0,
+    "avg_curtailed_w": 8.0,
+    "duration_s": 300,
+    "kwh_reduced": 0.000667,
+    "kwh_scaled": "667000",
+    "completed_at": 1715000310
+  },
+  {
+    "event_name": "hilo-tier1-1715001000",
+    "tier": 1,
+    "start_ts": 1715001000,
+    "end_ts": 1715001180,
+    "baseline_w": 14.0,
+    "avg_curtailed_w": 7.0,
+    "duration_s": 180,
+    "kwh_reduced": 0.000350,
+    "kwh_scaled": "350000",
+    "completed_at": 1715001190
+  },
+  {
+    "event_name": "grid-tier3-1715002000",
+    "tier": 3,
+    "start_ts": 1715002000,
+    "end_ts": 1715002600,
+    "baseline_w": 13.0,
+    "avg_curtailed_w": 10.0,
+    "duration_s": 600,
+    "kwh_reduced": 0.001667,
+    "kwh_scaled": "1667000",
+    "completed_at": 1715002610
+  }
+]

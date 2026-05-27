@@ -1,0 +1,62 @@
+[
+  {
+    "event_name": "grid-tier1-1715515290",
+    "tier": 1,
+    "start_ts": 1715515290,
+    "end_ts": 1715515470,
+    "baseline_w": 13.5,
+    "avg_curtailed_w": 6.0,
+    "duration_s": 180,
+    "kwh_reduced": 0.000375,
+    "kwh_scaled": "375000",
+    "completed_at": 1715515480
+  },
+  {
+    "event_name": "grid-tier2-1715515600",
+    "tier": 2,
+    "start_ts": 1715515600,
+    "end_ts": 1715515900,
+    "baseline_w": 13.5,
+    "avg_curtailed_w": 9.0,
+    "duration_s": 300,
+    "kwh_reduced": 0.000750,
+    "kwh_scaled": "750000",
+    "completed_at": 1715515910
+  },
+  {
+    "event_name": "hilo-tier1-1715516000",
+    "tier": 1,
+    "start_ts": 1715516000,
+    "end_ts": 1715516180,
+    "baseline_w": 14.0,
+    "avg_curtailed_w": 7.0,
+    "duration_s": 180,
+    "kwh_reduced": 0.000350,
+    "kwh_scaled": "350000",
+    "completed_at": 1715516190
+  },
+  {
+    "event_name": "ons-tier3-1715516400",
+    "tier": 3,
+    "start_ts": 1715516400,
+    "end_ts": 1715517000,
+    "baseline_w": 13.0,
+    "avg_curtailed_w": 11.0,
+    "duration_s": 600,
+    "kwh_reduced": 0.001833,
+    "kwh_scaled": "1833000",
+    "completed_at": 1715517010
+  },
+  {
+    "event_name": "grid-tier4-1715517200",
+    "tier": 4,
+    "start_ts": 1715517200,
+    "end_ts": 1715518100,
+    "baseline_w": 14.0,
+    "avg_curtailed_w": 13.0,
+    "duration_s": 900,
+    "kwh_reduced": 0.003250,
+    "kwh_scaled": "3250000",
+    "completed_at": 1715518110
+  }
+]
