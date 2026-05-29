@@ -2,127 +2,155 @@
  * PoR attestation workflow — runs on each CRE DON node every 2 minutes.
  *
  * Flow:
- *   1. HTTP GET data-joule.com/api/events/log (no-store cache header)
- *   2. Each node deterministically computes sum(BigInt(kwh_scaled))
- *   3. DON consensus by identical fields (total + count) — divergence = no write
- *   4. EVM read: currentOnChain = JouleCreditReserve.attestedKwhTotal()
- *   5. Hard-fail guard: delta > maxDeltaPerWrite → workflow aborts (no write)
- *   6. EVM write via writeReport: encoded uint256 → onReport() on the reserve
+ *   1. Each node GETs data-joule.com/api/events/log (no-store) and sums kwh_scaled
+ *   2. DON consensus reconciles the per-node {total, count} (median per field)
+ *   3. EVM read: current JouleCreditReserve.attestedKwhTotal()
+ *   4. Skip if consensus total <= current (nothing new); hard-fail if the jump
+ *      exceeds maxDeltaPerWrite (catches data corruption / schema drift)
+ *   5. Sign a report carrying abi.encode(uint256 newTotal) and writeReport() it to
+ *      the reserve — the KeystoneForwarder delivers it to onReport(), which decodes
+ *      the uint256 and enforces monotonicity on-chain.
  *
- * Skips a write when newTotal <= currentOnChain (already at or above ceiling).
- * For heartbeat refresh during quiet periods, see Open Items in the spec —
- * not implemented in v1.
+ * Written against @chainlink/cre-sdk 1.10.x, modeled on the official
+ * proof-of-reserve example in smartcontractkit/cre-sdk-typescript.
  */
 
 import {
-  HTTPClientCapability,
-  EVMClientCapability,
+  ConsensusAggregationByFields,
   CronCapability,
+  type CronPayload,
+  EVMClient,
+  encodeCallMsg,
+  getNetwork,
+  HTTPClient,
+  type HTTPSendRequester,
   handler,
+  LAST_FINALIZED_BLOCK_NUMBER,
+  median,
+  prepareReportRequest,
   Runner,
   type Runtime,
-  type ConsensusAggregationByFields,
+  TxStatus,
+  text,
+  bytesToHex,
 } from "@chainlink/cre-sdk";
-import { z } from "zod";
 import {
-  parseAbi,
-  encodeFunctionData,
+  type Address,
   decodeFunctionResult,
+  encodeFunctionData,
   encodeAbiParameters,
-  parseAbiParameters,
+  zeroAddress,
 } from "viem";
-import { computeAttestation, type Attestation } from "./src/compute";
+import { z } from "zod";
+import { sumKwhScaled, type Attestation } from "./src/compute";
+import { JouleCreditReserveAbi } from "./src/abi";
 
-type Config = {
-  schedule:          string;
-  apiUrl:            string;
-  reserveAddress:    `0x${string}`;
-  chainSelectorName: string;
-  maxDeltaPerWrite:  string;
+const configSchema = z.object({
+  schedule: z.string(),
+  apiUrl: z.string(),
+  reserveAddress: z.string(),
+  chainSelectorName: z.string(),
+  maxDeltaPerWrite: z.string(),
+});
+type Config = z.infer<typeof configSchema>;
+
+// Runs in node mode on every DON node. Fetches the event log and reduces it to
+// a deterministic {total, count} that consensus can reconcile.
+const fetchAttestation = (sendRequester: HTTPSendRequester, config: Config): Attestation => {
+  const response = sendRequester.sendRequest({ url: config.apiUrl, method: "GET" }).result();
+  if (response.statusCode !== 200) {
+    throw new Error(`HTTP ${response.statusCode} from ${config.apiUrl}`);
+  }
+  return sumKwhScaled(JSON.parse(text(response)));
 };
 
-const attestationSchema = z.object({
-  total: z.string().regex(/^\d+$/),
-  count: z.number().int().nonnegative(),
-});
-
-const reserveAbi = parseAbi([
-  "function attestedKwhTotal() external view returns (uint256)",
-]);
-
-const onCronTrigger = (runtime: Runtime<Config>): string => {
-  const httpClient = new HTTPClientCapability();
-  const evmClient  = new EVMClientCapability();
-
-  // Steps 1–3: fetch → each node sums → DON consensus
-  const aggregation: ConsensusAggregationByFields<Attestation> = {
-    method: "byFields",
-    fields: {
-      total: { method: "identical" },
-      count: { method: "identical" },
-    },
-  };
-
-  const attestation = httpClient
-    .sendRequest(runtime, computeAttestation, aggregation)(runtime.config.apiUrl)
-    .result();
-
-  attestationSchema.parse(attestation);
-  const newTotal = BigInt(attestation.total);
-
-  // Step 4: read currentOnChain
-  const callData = encodeFunctionData({
-    abi: reserveAbi,
-    functionName: "attestedKwhTotal",
+const reserveEvmClient = (runtime: Runtime<Config>): EVMClient => {
+  const network = getNetwork({
+    chainFamily: "evm",
+    chainSelectorName: runtime.config.chainSelectorName,
+    isTestnet: true,
   });
-  const readResult = evmClient
+  if (!network) {
+    throw new Error(`Network not found for chain selector: ${runtime.config.chainSelectorName}`);
+  }
+  return new EVMClient(network.chainSelector.selector);
+};
+
+const readAttestedTotal = (runtime: Runtime<Config>): bigint => {
+  const evm = reserveEvmClient(runtime);
+  const callData = encodeFunctionData({ abi: JouleCreditReserveAbi, functionName: "attestedKwhTotal" });
+  const call = evm
     .callContract(runtime, {
-      toAddress:         runtime.config.reserveAddress,
-      chainSelectorName: runtime.config.chainSelectorName,
-      callMsg:           { data: callData, blockNumber: 0n },
+      call: encodeCallMsg({
+        from: zeroAddress,
+        to: runtime.config.reserveAddress as Address,
+        data: callData,
+      }),
+      blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
     })
     .result();
-
-  const [currentOnChain] = decodeFunctionResult({
-    abi:          reserveAbi,
+  return decodeFunctionResult({
+    abi: JouleCreditReserveAbi,
     functionName: "attestedKwhTotal",
-    data:         readResult.data as `0x${string}`,
-  }) as [bigint];
+    data: bytesToHex(call.data),
+  }) as bigint;
+};
 
-  if (newTotal <= currentOnChain) {
-    runtime.log(
-      `Skip write: newTotal=${newTotal} <= currentOnChain=${currentOnChain} (count=${attestation.count})`,
-    );
+const writeAttestation = (runtime: Runtime<Config>, newTotal: bigint): string => {
+  const evm = reserveEvmClient(runtime);
+  // JouleCreditReserve.onReport does abi.decode(report, (uint256)), so the report
+  // payload is a bare ABI-encoded uint256 — not an encoded function call.
+  const payload = encodeAbiParameters([{ type: "uint256" }], [newTotal]);
+  const report = runtime.report(prepareReportRequest(payload)).result();
+  const resp = evm
+    .writeReport(runtime, { receiver: runtime.config.reserveAddress, report })
+    .result();
+  if (resp.txStatus !== TxStatus.SUCCESS) {
+    throw new Error(`writeReport failed: ${resp.errorMessage || resp.txStatus}`);
+  }
+  const txHash = bytesToHex(resp.txHash || new Uint8Array(32));
+  runtime.log(`Attestation written: total=${newTotal} tx=${txHash}`);
+  return txHash;
+};
+
+const doAttestation = (runtime: Runtime<Config>): string => {
+  const attestation = new HTTPClient()
+    .sendRequest(
+      runtime,
+      fetchAttestation,
+      ConsensusAggregationByFields<Attestation>({ total: median, count: median }),
+    )(runtime.config)
+    .result();
+
+  const newTotal = BigInt(attestation.total);
+  runtime.log(`Consensus attestation: total=${newTotal} count=${attestation.count}`);
+
+  const current = readAttestedTotal(runtime);
+  runtime.log(`On-chain attestedKwhTotal=${current}`);
+
+  if (newTotal <= current) {
+    runtime.log(`Skip write: newTotal=${newTotal} <= current=${current}`);
     return "skipped";
   }
 
-  // Step 5: hard-fail guard against catastrophic deltas
-  const delta    = newTotal - currentOnChain;
+  const delta = newTotal - current;
   const maxDelta = BigInt(runtime.config.maxDeltaPerWrite);
   if (delta > maxDelta) {
     throw new Error(
       `Delta ${delta} exceeds maxDeltaPerWrite ${maxDelta} — refusing to write. ` +
-      `Manual investigation required (likely data corruption or schema change).`,
+        `Manual investigation required (likely data corruption or schema change).`,
     );
   }
 
-  // Step 6: signed report → KeystoneForwarder → onReport() on the reserve
-  const encoded      = encodeAbiParameters(parseAbiParameters("uint256"), [newTotal]);
-  const signedReport = runtime.report(encoded);
+  return writeAttestation(runtime, newTotal);
+};
 
-  const txResult = evmClient
-    .writeReport(runtime, {
-      toAddress:         runtime.config.reserveAddress,
-      chainSelectorName: runtime.config.chainSelectorName,
-      report:            signedReport,
-      gasLimit:          200000n,
-    })
-    .result();
-
-  runtime.log(
-    `Attestation updated: total=${newTotal} delta=${delta} count=${attestation.count} tx=${txResult.txHash}`,
-  );
-  return txResult.txHash;
+const onCronTrigger = (runtime: Runtime<Config>, payload: CronPayload): string => {
+  if (!payload.scheduledExecutionTime) {
+    throw new Error("Scheduled execution time is required");
+  }
+  runtime.log("PoR cron trigger fired");
+  return doAttestation(runtime);
 };
 
 const initWorkflow = (config: Config) => {
@@ -131,6 +159,8 @@ const initWorkflow = (config: Config) => {
 };
 
 export async function main() {
-  const runner = await Runner.newRunner<Config>();
+  const runner = await Runner.newRunner<Config>({ configSchema });
   await runner.run(initWorkflow);
 }
+
+main();

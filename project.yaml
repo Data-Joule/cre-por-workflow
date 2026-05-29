@@ -1,18 +1,13 @@
-# project.yaml — CRE project chain configuration
-#
-# Numeric chain selectors MUST be fetched from docs.chain.link/ccip/directory
-# before deploying — the values below are placeholders that will fail at
-# `cre workflow deploy` if left as-is.
-#
-# Polygon Amoy testnet: https://docs.chain.link/cre  (chain-selector name: polygon-testnet-amoy)
-# Polygon Mainnet:      verify against current CRE-supported networks list
+# CRE project settings. Targets define rpcs (and optionally account) groups.
+# Chain names validated against `cre workflow supported-chains`.
+# RPC URLs support ${VAR} syntax resolved from .env / shell environment.
 
 staging-settings:
-  evms:
-    - chain-selector: "REPLACE_WITH_AMOY_NUMERIC_SELECTOR"
-      rpc-url: "https://rpc-amoy.polygon.technology"
+  rpcs:
+    - chain-name: polygon-testnet-amoy
+      url: https://rpc-amoy.polygon.technology
 
 production-settings:
-  evms:
-    - chain-selector: "REPLACE_WITH_POLYGON_MAINNET_NUMERIC_SELECTOR"
-      rpc-url: "REPLACE_WITH_POLYGON_MAINNET_RPC"
+  rpcs:
+    - chain-name: polygon-mainnet
+      url: ${POLYGON_RPC_URL}
