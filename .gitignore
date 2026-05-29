@@ -4,3 +4,8 @@ dist/
 build/
 *.wasm
 .DS_Store
+
+# CRE build artifacts
+por-workflow/.cre_build_tmp.js
+*.cre_build_tmp.js
+binary.wasm*
